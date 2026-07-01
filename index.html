@@ -223,20 +223,30 @@ const fmtNum = (n) => n.toLocaleString("en-US", { maximumFractionDigits: n < 1 ?
 const short = (a) => a.slice(0, 4) + "…" + a.slice(-4);
 
 // ---------- settings modal ----------
+// Inputs only ever show the visitor's OWN override (from localStorage), never the
+// baked-in default key — so opening Settings can't leak the shared default to anyone.
 $("settingsBtn").onclick = () => {
-  $("rpcInput").value = cfg.rpc;
-  $("heliusInput").value = cfg.helius;
-  $("birdeyeInput").value = cfg.birdeye;
+  $("rpcInput").value = localStorage.getItem("sol_rpc") || "";
+  $("heliusInput").value = localStorage.getItem("sol_helius") || "";
+  $("birdeyeInput").value = localStorage.getItem("sol_birdeye") || "";
+  $("rpcInput").placeholder = DEFAULT_KEYS.rpc ? "используется общий RPC по умолчанию" : "https://api.mainnet-beta.solana.com";
+  $("heliusInput").placeholder = DEFAULT_KEYS.helius ? "используется общий ключ по умолчанию" : "получить бесплатно на helius.dev";
+  $("birdeyeInput").placeholder = DEFAULT_KEYS.birdeye ? "используется общий ключ по умолчанию" : "получить на docs.birdeye.so";
   $("settingsOverlay").classList.add("show");
 };
 $("settingsCancel").onclick = () => $("settingsOverlay").classList.remove("show");
 $("settingsSave").onclick = () => {
-  cfg.rpc = $("rpcInput").value.trim() || "https://api.mainnet-beta.solana.com";
-  cfg.helius = $("heliusInput").value.trim();
-  cfg.birdeye = $("birdeyeInput").value.trim();
-  localStorage.setItem("sol_rpc", cfg.rpc);
-  localStorage.setItem("sol_helius", cfg.helius);
-  localStorage.setItem("sol_birdeye", cfg.birdeye);
+  const rpcVal = $("rpcInput").value.trim();
+  const heliusVal = $("heliusInput").value.trim();
+  const birdeyeVal = $("birdeyeInput").value.trim();
+  // Empty field = "use the default", not "wipe it out" — so we remove the override
+  // key entirely instead of writing an empty string over it.
+  rpcVal ? localStorage.setItem("sol_rpc", rpcVal) : localStorage.removeItem("sol_rpc");
+  heliusVal ? localStorage.setItem("sol_helius", heliusVal) : localStorage.removeItem("sol_helius");
+  birdeyeVal ? localStorage.setItem("sol_birdeye", birdeyeVal) : localStorage.removeItem("sol_birdeye");
+  cfg.rpc = rpcVal || DEFAULT_KEYS.rpc || "https://api.mainnet-beta.solana.com";
+  cfg.helius = heliusVal || DEFAULT_KEYS.helius || "";
+  cfg.birdeye = birdeyeVal || DEFAULT_KEYS.birdeye || "";
   $("settingsOverlay").classList.remove("show");
   if (state.pubkey) refreshAll();
 };
@@ -251,6 +261,27 @@ function detectWallets() {
   return wallets;
 }
 
+// Wallet extensions inject window.phantom / window.backpack / window.solflare
+// asynchronously after the page loads, and not always in the same order. If the user
+// clicks Connect Wallet before Phantom finishes injecting (Backpack often wins that
+// race), Phantom silently doesn't show up. Give slow injectors a brief window to appear.
+async function detectWalletsWithGrace(timeoutMs = 1000, intervalMs = 100) {
+  const start = Date.now();
+  let found = detectWallets();
+  const knownNames = new Set(found.map((w) => w.name));
+  while (Date.now() - start < timeoutMs) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+    const next = detectWallets();
+    if (next.length !== found.length || next.some((w) => !knownNames.has(w.name))) {
+      found = next;
+      next.forEach((w) => knownNames.add(w.name));
+      // Keep waiting out the full window once something new shows up — another
+      // provider may still be a beat behind — but don't wait longer than timeoutMs total.
+    }
+  }
+  return detectWallets();
+}
+
 $("walletBtn").onclick = async () => {
   if (state.pubkey) {
     // disconnect
@@ -263,11 +294,11 @@ $("walletBtn").onclick = async () => {
   const origLabel = $("walletBtn").textContent;
   $("walletBtn").textContent = "Loading…";
   const ok = await ensureWeb3(true);
+  if (!ok) { $("walletBtn").textContent = origLabel; return; }
+  const wallets = await detectWalletsWithGrace();
   $("walletBtn").textContent = origLabel;
-  if (!ok) return;
-  const wallets = detectWallets();
   if (wallets.length === 0) {
-    alert("Кошелёк не найден. Установи расширение Phantom или Solflare.");
+    alert("Кошелёк не найден. Установи расширение Phantom, Solflare или Backpack и обнови страницу.");
     return;
   }
   if (wallets.length === 1) {
@@ -323,6 +354,25 @@ function showErr(cardId, e) {
   $(cardId).innerHTML = `<div class="err">Ошибка загрузки: ${e.message}. Публичный RPC часто режет по лимитам — попробуй свой RPC (Alchemy/Helius) в настройках ⚙</div>`;
 }
 
+// Retries on 429 / compute-unit-throttling errors with exponential backoff.
+// Free/trial RPC tiers cap requests-per-second, and getProgramAccounts (used for
+// staking) is the single heaviest call, so it's the one most likely to get throttled.
+async function withRetry(fn, { retries = 3, baseDelay = 900 } = {}) {
+  let lastErr;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      const msg = (e && e.message) || "";
+      const is429 = /429|exceeded its compute|rate.?limit/i.test(msg);
+      if (!is429 || i === retries) throw e;
+      await new Promise((r) => setTimeout(r, baseDelay * Math.pow(2, i)));
+    }
+  }
+  throw lastErr;
+}
+
 let grandTotal = 0;
 function updateGrandTotal(section, value) {
   state._totals = state._totals || {};
@@ -334,9 +384,9 @@ function updateGrandTotal(section, value) {
 async function loadTokens(owner) {
   const conn = state.connection;
   const [nativeLamports, legacyAccs, t22Accs] = await Promise.all([
-    conn.getBalance(owner),
-    conn.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }),
-    conn.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM_ID }),
+    withRetry(() => conn.getBalance(owner)),
+    withRetry(() => conn.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID })),
+    withRetry(() => conn.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM_ID })),
   ]);
 
   const held = [];
@@ -413,12 +463,16 @@ function renderTokens(rows) {
 
 async function loadStaking(owner) {
   const conn = state.connection;
-  const accounts = await conn.getParsedProgramAccounts(STAKE_PROGRAM_ID, {
+  // Small stagger so this (the heaviest call — a full program-account scan) doesn't
+  // burst against the RPC's requests/compute-units-per-second cap at the same instant
+  // as the token balance calls above.
+  await new Promise((r) => setTimeout(r, 400));
+  const accounts = await withRetry(() => conn.getParsedProgramAccounts(STAKE_PROGRAM_ID, {
     filters: [
       { dataSize: 200 },
       { memcmp: { offset: 44, bytes: owner.toBase58() } },
     ],
-  });
+  }), { retries: 4, baseDelay: 1000 });
 
   $("stakeBadge").textContent = accounts.length;
   if (accounts.length === 0) {
