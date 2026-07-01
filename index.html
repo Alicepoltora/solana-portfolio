@@ -162,16 +162,59 @@
 </div>
 
 <script>
+// NOTE: nothing here at top level must throw — if it does, every onclick
+// handler wired further down never gets attached and buttons look "dead".
 const SOL_MINT = "So11111111111111111111111111111111111111112";
-const TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-const TOKEN_2022_PROGRAM_ID = new solanaWeb3.PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
-const STAKE_PROGRAM_ID = new solanaWeb3.PublicKey("Stake11111111111111111111111111111111111111");
+let TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, STAKE_PROGRAM_ID;
+
+// Baked-in default keys (still overridable per-browser via Settings ⚙, which takes priority).
+const DEFAULT_KEYS = {
+  rpc: "__DEFAULT_RPC__",
+  helius: "__DEFAULT_HELIUS__",
+  birdeye: "__DEFAULT_BIRDEYE__",
+};
 
 const cfg = {
-  rpc: localStorage.getItem("sol_rpc") || "https://api.mainnet-beta.solana.com",
-  helius: localStorage.getItem("sol_helius") || "",
-  birdeye: localStorage.getItem("sol_birdeye") || "",
+  rpc: localStorage.getItem("sol_rpc") || DEFAULT_KEYS.rpc || "https://api.mainnet-beta.solana.com",
+  helius: localStorage.getItem("sol_helius") || DEFAULT_KEYS.helius || "",
+  birdeye: localStorage.getItem("sol_birdeye") || DEFAULT_KEYS.birdeye || "",
 };
+
+// Lazily create @solana/web3.js objects — safe to call many times.
+function web3Ready() {
+  if (typeof solanaWeb3 === "undefined") return false;
+  if (!TOKEN_PROGRAM_ID) {
+    TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    TOKEN_2022_PROGRAM_ID = new solanaWeb3.PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+    STAKE_PROGRAM_ID = new solanaWeb3.PublicKey("Stake11111111111111111111111111111111111111");
+  }
+  return true;
+}
+
+// If the primary CDN (jsdelivr) is blocked/slow on the visitor's network,
+// try a fallback CDN before giving up.
+let fallbackLoading = null;
+function loadWeb3Fallback() {
+  if (web3Ready()) return Promise.resolve(true);
+  if (fallbackLoading) return fallbackLoading;
+  fallbackLoading = new Promise((resolve) => {
+    const s = document.createElement("script");
+    s.src = "https://unpkg.com/@solana/web3.js@1.98.4/lib/index.iife.min.js";
+    s.onload = () => resolve(web3Ready());
+    s.onerror = () => resolve(false);
+    document.head.appendChild(s);
+  });
+  return fallbackLoading;
+}
+
+async function ensureWeb3(withAlert) {
+  if (web3Ready()) return true;
+  const ok = await loadWeb3Fallback();
+  if (!ok && withAlert) {
+    alert("Не удалось загрузить библиотеку @solana/web3.js (заблокирован CDN?). Проверь VPN/блокировщик рекламы и обнови страницу.");
+  }
+  return ok;
+}
 
 let state = { pubkey: null, connection: null };
 
@@ -209,7 +252,7 @@ function detectWallets() {
   return wallets;
 }
 
-$("walletBtn").onclick = () => {
+$("walletBtn").onclick = async () => {
   if (state.pubkey) {
     // disconnect
     state.pubkey = null;
@@ -218,6 +261,11 @@ $("walletBtn").onclick = () => {
     $("emptyState").style.display = "block";
     return;
   }
+  const origLabel = $("walletBtn").textContent;
+  $("walletBtn").textContent = "Loading…";
+  const ok = await ensureWeb3(true);
+  $("walletBtn").textContent = origLabel;
+  if (!ok) return;
   const wallets = detectWallets();
   if (wallets.length === 0) {
     alert("Кошелёк не найден. Установи расширение Phantom или Solflare.");
