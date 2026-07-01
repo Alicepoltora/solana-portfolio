@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Solana Portfolio</title>
+<script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.98.4/lib/index.iife.min.js"></script>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#12151d; --panel2:#161a24; --border:#20242f;
+    --text:#e8eaf0; --muted:#8891a5; --accent:#7c5cff; --accent2:#00d4b5;
+    --green:#3fce6e; --red:#ff5c5c;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 28px; border-bottom:1px solid var(--border);
+    position:sticky; top:0; background:rgba(11,14,20,0.9); backdrop-filter:blur(6px); z-index:10;
+  }
+  .logo{display:flex; align-items:center; gap:10px; font-weight:700; font-size:18px;}
+  .logo .dot{width:10px;height:10px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));}
+  .header-actions{display:flex; align-items:center; gap:10px;}
+  button{
+    font-family:inherit; cursor:pointer; border:none; border-radius:10px;
+    padding:10px 16px; font-size:14px; font-weight:600; transition:opacity .15s;
+  }
+  button:hover{opacity:.85;}
+  .btn-primary{background:linear-gradient(135deg,var(--accent),#5a3dff); color:#fff;}
+  .btn-ghost{background:var(--panel2); color:var(--text); border:1px solid var(--border);}
+  .icon-btn{background:var(--panel2); border:1px solid var(--border); color:var(--muted); width:38px; height:38px; border-radius:10px; display:flex; align-items:center; justify-content:center; padding:0;}
+  main{max-width:920px; margin:0 auto; padding:28px 20px 80px;}
+  .hero{
+    background:linear-gradient(135deg,#171a26,#12151d); border:1px solid var(--border);
+    border-radius:18px; padding:28px 32px; margin-bottom:24px;
+  }
+  .hero .label{color:var(--muted); font-size:13px; margin-bottom:8px;}
+  .hero .value{font-size:40px; font-weight:800; letter-spacing:-0.5px;}
+  .hero .addr{color:var(--muted); font-size:13px; margin-top:8px; word-break:break-all;}
+  .empty-state{
+    text-align:center; padding:80px 20px; color:var(--muted);
+  }
+  .empty-state h2{color:var(--text); margin-bottom:8px;}
+  .section{margin-bottom:22px;}
+  .section-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;}
+  .section-head h3{font-size:15px; margin:0; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.5px;}
+  .badge{font-size:11px; padding:2px 8px; border-radius:20px; background:var(--panel2); color:var(--muted); border:1px solid var(--border);}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:14px; overflow:hidden;}
+  .row{display:flex; align-items:center; padding:13px 18px; border-bottom:1px solid var(--border); gap:12px;}
+  .row:last-child{border-bottom:none;}
+  .row:hover{background:var(--panel2);}
+  .token-icon{width:32px; height:32px; border-radius:50%; background:var(--panel2); object-fit:cover; flex-shrink:0;}
+  .col-main{flex:1; min-width:0;}
+  .sym{font-weight:600; font-size:14px;}
+  .sub{color:var(--muted); font-size:12px; margin-top:2px;}
+  .col-amt{text-align:right; min-width:120px;}
+  .amt{font-weight:600; font-size:14px;}
+  .amt-sub{color:var(--muted); font-size:12px; margin-top:2px;}
+  .nft-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:12px; padding:14px;}
+  .nft-item img, .nft-item .ph{width:100%; aspect-ratio:1; border-radius:10px; object-fit:cover; background:var(--panel2);}
+  .nft-item .name{font-size:12px; margin-top:6px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .placeholder{padding:22px 18px; color:var(--muted); font-size:13px; line-height:1.6;}
+  .placeholder code{background:var(--panel2); padding:2px 6px; border-radius:6px; font-size:12px;}
+  .placeholder a{color:var(--accent2);}
+  .loading{padding:22px 18px; color:var(--muted); font-size:13px;}
+  .toggle-line{display:flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; margin-bottom:14px;}
+  .toggle-line input{accent-color:var(--accent);}
+  /* modal */
+  .overlay{position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:100;}
+  .overlay.show{display:flex;}
+  .modal{background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:24px; width:420px; max-width:90vw;}
+  .modal h3{margin:0 0 4px;}
+  .modal p.hint{color:var(--muted); font-size:12px; margin:0 0 18px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block; font-size:12px; color:var(--muted); margin-bottom:6px;}
+  .field input{width:100%; background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:10px 12px; color:var(--text); font-size:13px;}
+  .modal-actions{display:flex; gap:10px; margin-top:18px;}
+  .wallet-menu{position:relative;}
+  .wallet-dropdown{
+    position:absolute; right:0; top:46px; background:var(--panel); border:1px solid var(--border);
+    border-radius:12px; min-width:180px; padding:6px; display:none; box-shadow:0 12px 30px rgba(0,0,0,.4);
+  }
+  .wallet-dropdown.show{display:block;}
+  .wallet-dropdown button{width:100%; text-align:left; background:transparent; color:var(--text); padding:10px 12px;}
+  .wallet-dropdown button:hover{background:var(--panel2);}
+  .err{color:var(--red); font-size:12px; padding:10px 18px;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo"><span class="dot"></span> Solana Portfolio</div>
+  <div class="header-actions">
+    <button class="icon-btn" id="settingsBtn" title="Настройки">⚙</button>
+    <div class="wallet-menu">
+      <button class="btn-primary" id="walletBtn">Connect Wallet</button>
+      <div class="wallet-dropdown" id="walletDropdown"></div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="emptyState" class="empty-state">
+    <h2>Портфель на Solana</h2>
+    <p>Подключи кошелёк, чтобы увидеть SOL, SPL-токены, стейкинг, NFT и DeFi-позиции.</p>
+  </div>
+
+  <div id="content" style="display:none;">
+    <div class="hero">
+      <div class="label">Total portfolio value</div>
+      <div class="value" id="totalValue">$0.00</div>
+      <div class="addr" id="walletAddr"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-head"><h3>Tokens</h3><span class="badge" id="tokensBadge">0</span></div>
+      <div class="toggle-line"><input type="checkbox" id="hideDust" checked> Скрыть токены дешевле $1</div>
+      <div class="card" id="tokensCard"><div class="loading">Загрузка…</div></div>
+    </div>
+
+    <div class="section">
+      <div class="section-head"><h3>Staking</h3><span class="badge" id="stakeBadge">0</span></div>
+      <div class="card" id="stakeCard"><div class="loading">Загрузка…</div></div>
+    </div>
+
+    <div class="section">
+      <div class="section-head"><h3>NFT</h3><span class="badge" id="nftBadge">0</span></div>
+      <div class="card" id="nftCard"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-head"><h3>DeFi позиции</h3><span class="badge">beta</span></div>
+      <div class="card" id="defiCard"></div>
+    </div>
+  </div>
+</main>
+
+<div class="overlay" id="settingsOverlay">
+  <div class="modal">
+    <h3>Настройки</h3>
+    <p class="hint">Ключи хранятся только в этом браузере (localStorage), никуда не отправляются кроме соответствующих API.</p>
+    <div class="field">
+      <label>RPC endpoint</label>
+      <input id="rpcInput" placeholder="https://api.mainnet-beta.solana.com">
+    </div>
+    <div class="field">
+      <label>Helius API key (для NFT, опционально)</label>
+      <input id="heliusInput" placeholder="получить бесплатно на helius.dev">
+    </div>
+    <div class="field">
+      <label>Birdeye API key (для DeFi-позиций, опционально)</label>
+      <input id="birdeyeInput" placeholder="получить на docs.birdeye.so">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-ghost" id="settingsCancel" style="flex:1;">Отмена</button>
+      <button class="btn-primary" id="settingsSave" style="flex:1;">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+const TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const TOKEN_2022_PROGRAM_ID = new solanaWeb3.PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+const STAKE_PROGRAM_ID = new solanaWeb3.PublicKey("Stake11111111111111111111111111111111111111");
+
+const cfg = {
+  rpc: localStorage.getItem("sol_rpc") || "https://api.mainnet-beta.solana.com",
+  helius: localStorage.getItem("sol_helius") || "",
+  birdeye: localStorage.getItem("sol_birdeye") || "",
+};
+
+let state = { pubkey: null, connection: null };
+
+const $ = (id) => document.getElementById(id);
+const fmtUsd = (n) => "$" + n.toLocaleString("en-US", { maximumFractionDigits: n < 1 ? 4 : 2 });
+const fmtNum = (n) => n.toLocaleString("en-US", { maximumFractionDigits: n < 1 ? 6 : 4 });
+const short = (a) => a.slice(0, 4) + "…" + a.slice(-4);
+
+// ---------- settings modal ----------
+$("settingsBtn").onclick = () => {
+  $("rpcInput").value = cfg.rpc;
+  $("heliusInput").value = cfg.helius;
+  $("birdeyeInput").value = cfg.birdeye;
+  $("settingsOverlay").classList.add("show");
+};
+$("settingsCancel").onclick = () => $("settingsOverlay").classList.remove("show");
+$("settingsSave").onclick = () => {
+  cfg.rpc = $("rpcInput").value.trim() || "https://api.mainnet-beta.solana.com";
+  cfg.helius = $("heliusInput").value.trim();
+  cfg.birdeye = $("birdeyeInput").value.trim();
+  localStorage.setItem("sol_rpc", cfg.rpc);
+  localStorage.setItem("sol_helius", cfg.helius);
+  localStorage.setItem("sol_birdeye", cfg.birdeye);
+  $("settingsOverlay").classList.remove("show");
+  if (state.pubkey) refreshAll();
+};
+
+// ---------- wallet connect ----------
+function detectWallets() {
+  const wallets = [];
+  if (window.phantom?.solana) wallets.push({ name: "Phantom", provider: window.phantom.solana });
+  else if (window.solana?.isPhantom) wallets.push({ name: "Phantom", provider: window.solana });
+  if (window.solflare) wallets.push({ name: "Solflare", provider: window.solflare });
+  if (window.backpack) wallets.push({ name: "Backpack", provider: window.backpack });
+  return wallets;
+}
+
+$("walletBtn").onclick = () => {
+  if (state.pubkey) {
+    // disconnect
+    state.pubkey = null;
+    $("walletBtn").textContent = "Connect Wallet";
+    $("content").style.display = "none";
+    $("emptyState").style.display = "block";
+    return;
+  }
+  const wallets = detectWallets();
+  if (wallets.length === 0) {
+    alert("Кошелёк не найден. Установи расширение Phantom или Solflare.");
+    return;
+  }
+  if (wallets.length === 1) {
+    connectWith(wallets[0]);
+  } else {
+    const dd = $("walletDropdown");
+    dd.innerHTML = "";
+    wallets.forEach((w) => {
+      const b = document.createElement("button");
+      b.textContent = w.name;
+      b.onclick = () => { dd.classList.remove("show"); connectWith(w); };
+      dd.appendChild(b);
+    });
+    dd.classList.add("show");
+  }
+};
+
+async function connectWith(wallet) {
+  try {
+    const resp = await wallet.provider.connect();
+    const pubkey = resp.publicKey ? resp.publicKey.toString() : wallet.provider.publicKey.toString();
+    state.pubkey = pubkey;
+    $("walletBtn").textContent = short(pubkey);
+    $("walletAddr").textContent = pubkey;
+    $("emptyState").style.display = "none";
+    $("content").style.display = "block";
+    refreshAll();
+  } catch (e) {
+    alert("Не удалось подключить кошелёк: " + e.message);
+  }
+}
+
+$("hideDust").onchange = () => { if (state._tokens) renderTokens(state._tokens); };
+
+// ---------- data loading ----------
+async function refreshAll() {
+  state.connection = new solanaWeb3.Connection(cfg.rpc, "confirmed");
+  const owner = new solanaWeb3.PublicKey(state.pubkey);
+
+  $("tokensCard").innerHTML = '<div class="loading">Загрузка…</div>';
+  $("stakeCard").innerHTML = '<div class="loading">Загрузка…</div>';
+  $("nftCard").innerHTML = '';
+  $("defiCard").innerHTML = '';
+
+  loadTokens(owner).catch((e) => showErr("tokensCard", e));
+  loadStaking(owner).catch((e) => showErr("stakeCard", e));
+  loadNFTs(owner).catch((e) => showErr("nftCard", e));
+  loadDefi(owner);
+}
+
+function showErr(cardId, e) {
+  console.error(e);
+  $(cardId).innerHTML = `<div class="err">Ошибка загрузки: ${e.message}. Публичный RPC часто режет по лимитам — попробуй свой RPC (Alchemy/Helius) в настройках ⚙</div>`;
+}
+
+let grandTotal = 0;
+function updateGrandTotal(section, value) {
+  state._totals = state._totals || {};
+  state._totals[section] = value;
+  grandTotal = Object.values(state._totals).reduce((a, b) => a + b, 0);
+  $("totalValue").textContent = fmtUsd(grandTotal);
+}
+
+async function loadTokens(owner) {
+  const conn = state.connection;
+  const [nativeLamports, legacyAccs, t22Accs] = await Promise.all([
+    conn.getBalance(owner),
+    conn.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }),
+    conn.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM_ID }),
+  ]);
+
+  const held = [];
+  [...legacyAccs.value, ...t22Accs.value].forEach((a) => {
+    const info = a.account.data.parsed.info;
+    const amt = info.tokenAmount.uiAmount;
+    if (amt && amt > 0) held.push({ mint: info.mint, amount: amt, decimals: info.tokenAmount.decimals });
+  });
+
+  const mints = [SOL_MINT, ...held.map((h) => h.mint)];
+  const meta = await fetchTokenMeta(mints);
+
+  const rows = [];
+  const solAmt = nativeLamports / 1e9;
+  const solMeta = meta[SOL_MINT] || {};
+  rows.push({
+    mint: SOL_MINT, symbol: "SOL", name: "Solana", icon: solMeta.icon,
+    amount: solAmt, price: solMeta.usdPrice || 0, value: solAmt * (solMeta.usdPrice || 0),
+  });
+  held.forEach((h) => {
+    const m = meta[h.mint] || {};
+    const price = m.usdPrice || 0;
+    rows.push({
+      mint: h.mint, symbol: m.symbol || short(h.mint), name: m.name || "Unknown token",
+      icon: m.icon, amount: h.amount, price, value: h.amount * price,
+    });
+  });
+
+  rows.sort((a, b) => b.value - a.value);
+  state._tokens = rows;
+  renderTokens(rows);
+  const total = rows.reduce((s, r) => s + r.value, 0);
+  updateGrandTotal("tokens", total);
+}
+
+async function fetchTokenMeta(mints) {
+  const unique = [...new Set(mints)];
+  const chunks = [];
+  for (let i = 0; i < unique.length; i += 30) chunks.push(unique.slice(i, i + 30));
+  const out = {};
+  for (const chunk of chunks) {
+    try {
+      const res = await fetch(`https://lite-api.jup.ag/tokens/v2/search?query=${chunk.join(",")}`);
+      if (!res.ok) continue;
+      const data = await res.json();
+      data.forEach((t) => { out[t.id] = t; });
+    } catch (e) { console.warn("token meta fetch failed", e); }
+  }
+  return out;
+}
+
+function renderTokens(rows) {
+  const hideDust = $("hideDust").checked;
+  const visible = rows.filter((r) => !hideDust || r.value >= 1);
+  $("tokensBadge").textContent = rows.length;
+  if (visible.length === 0) {
+    $("tokensCard").innerHTML = '<div class="loading">Нет токенов дороже $1</div>';
+    return;
+  }
+  $("tokensCard").innerHTML = visible.map((r) => `
+    <div class="row">
+      ${r.icon ? `<img class="token-icon" src="${r.icon}" onerror="this.style.visibility='hidden'">` : `<div class="token-icon"></div>`}
+      <div class="col-main">
+        <div class="sym">${r.symbol}</div>
+        <div class="sub">${r.name}</div>
+      </div>
+      <div class="col-amt">
+        <div class="amt">${fmtUsd(r.value)}</div>
+        <div class="amt-sub">${fmtNum(r.amount)} ${r.symbol}</div>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function loadStaking(owner) {
+  const conn = state.connection;
+  const accounts = await conn.getParsedProgramAccounts(STAKE_PROGRAM_ID, {
+    filters: [
+      { dataSize: 200 },
+      { memcmp: { offset: 44, bytes: owner.toBase58() } },
+    ],
+  });
+
+  $("stakeBadge").textContent = accounts.length;
+  if (accounts.length === 0) {
+    $("stakeCard").innerHTML = '<div class="loading">Нет активного стейкинга</div>';
+    updateGrandTotal("stake", 0);
+    return;
+  }
+
+  const solMeta = await fetchTokenMeta([SOL_MINT]);
+  const price = (solMeta[SOL_MINT] || {}).usdPrice || 0;
+
+  const rows = accounts.map(({ pubkey, account }) => {
+    const info = account.data.parsed.info;
+    const stake = info.stake;
+    const lamports = stake ? Number(stake.delegation.stake) : 0;
+    const deactivationEpoch = stake ? stake.delegation.deactivationEpoch : "0";
+    const isActive = deactivationEpoch === "18446744073709551615";
+    return {
+      pubkey: pubkey.toBase58(),
+      voter: stake ? stake.delegation.voter : null,
+      sol: lamports / 1e9,
+      status: isActive ? "Active" : "Deactivating",
+    };
+  }).filter((r) => r.sol > 0);
+
+  rows.sort((a, b) => b.sol - a.sol);
+  $("stakeCard").innerHTML = rows.map((r) => `
+    <div class="row">
+      <div class="token-icon" style="display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted);">STK</div>
+      <div class="col-main">
+        <div class="sym">${short(r.pubkey)}</div>
+        <div class="sub">${r.status}${r.voter ? " · validator " + short(r.voter) : ""}</div>
+      </div>
+      <div class="col-amt">
+        <div class="amt">${fmtUsd(r.sol * price)}</div>
+        <div class="amt-sub">${fmtNum(r.sol)} SOL</div>
+      </div>
+    </div>
+  `).join("");
+
+  const total = rows.reduce((s, r) => s + r.sol * price, 0);
+  updateGrandTotal("stake", total);
+}
+
+async function loadNFTs(owner) {
+  if (!cfg.helius) {
+    $("nftCard").innerHTML = `<div class="placeholder">
+      Чтобы увидеть NFT, добавь бесплатный Helius API key в настройках ⚙ (helius.dev — регистрация за пару минут, есть free tier).
+      Используется метод <code>getAssetsByOwner</code> (Digital Asset Standard API).
+    </div>`;
+    $("nftBadge").textContent = 0;
+    return;
+  }
+  try {
+    const res = await fetch(`https://mainnet.helius-rpc.com/?api-key=${cfg.helius}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0", id: "portfolio", method: "getAssetsByOwner",
+        params: { ownerAddress: owner.toBase58(), page: 1, limit: 50 },
+      }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    const items = (data.result?.items || []).filter((i) => i.interface !== "FungibleToken" && i.interface !== "FungibleAsset");
+    $("nftBadge").textContent = items.length;
+    if (items.length === 0) {
+      $("nftCard").innerHTML = '<div class="loading">NFT не найдены</div>';
+      return;
+    }
+    $("nftCard").innerHTML = `<div class="nft-grid">${items.map((i) => {
+      const img = i.content?.links?.image || i.content?.files?.[0]?.uri || "";
+      const name = i.content?.metadata?.name || "Unnamed";
+      return `<div class="nft-item">
+        ${img ? `<img src="${img}" loading="lazy" onerror="this.outerHTML='<div class=ph></div>'">` : `<div class="ph"></div>`}
+        <div class="name">${name}</div>
+      </div>`;
+    }).join("")}</div>`;
+  } catch (e) {
+    showErr("nftCard", e);
+  }
+}
+
+async function loadDefi(owner) {
+  if (!cfg.birdeye) {
+    $("defiCard").innerHTML = `<div class="placeholder">
+      Лендинг/LP/перпы (Kamino, Drift, Marinade и т.п.) требуют агрегатор — на Solana нет единого стандарта позиций как ERC20/Aave на EVM.
+      Добавь Birdeye API key в настройках ⚙, чтобы включить этот блок (wallet API — beta, docs.birdeye.so). Точная схема ответа может отличаться в зависимости от тарифа — endpoint ниже best-effort и может потребовать правки под твой план.
+    </div>`;
+    return;
+  }
+  try {
+    const res = await fetch(`https://public-api.birdeye.so/wallet/v2/token-balance?wallet=${owner.toBase58()}`, {
+      headers: { "X-API-KEY": cfg.birdeye, "x-chain": "solana" },
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || "Birdeye API error");
+    $("defiCard").innerHTML = `<div class="placeholder">Ответ Birdeye получен — доработай рендер под точную схему твоего тарифа:<br><code>${JSON.stringify(data).slice(0, 400)}…</code></div>`;
+  } catch (e) {
+    showErr("defiCard", e);
+  }
+}
+
+// close wallet dropdown on outside click
+document.addEventListener("click", (e) => {
+  const menu = document.querySelector(".wallet-menu");
+  if (!menu.contains(e.target)) $("walletDropdown").classList.remove("show");
+});
+</script>
+</body>
+</html>
