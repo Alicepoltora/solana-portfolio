@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Solana Portfolio</title>
 <script src="https://cdn.jsdelivr.net/npm/@solana/web3.js@1.98.4/lib/index.iife.min.js"></script>
+<script src="keys.js" onerror="console.warn('keys.js not present — no baked-in default API keys, use Settings to add your own')"></script>
 <style>
   :root{
     --bg:#0b0e14; --panel:#12151d; --panel2:#161a24; --border:#20242f;
@@ -167,12 +168,10 @@
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 let TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, STAKE_PROGRAM_ID;
 
-// Baked-in default keys (still overridable per-browser via Settings ⚙, which takes priority).
-const DEFAULT_KEYS = {
-  rpc: "__DEFAULT_RPC__",
-  helius: "__DEFAULT_HELIUS__",
-  birdeye: "__DEFAULT_BIRDEYE__",
-};
+// Baked-in default keys, loaded from keys.js (gitignored, lives only on the server —
+// never committed, so the public GitHub repo never contains live secrets).
+// Still overridable per-browser via Settings ⚙, which takes priority.
+const DEFAULT_KEYS = window.__DEFAULT_KEYS__ || { rpc: "", helius: "", birdeye: "" };
 
 const cfg = {
   rpc: localStorage.getItem("sol_rpc") || DEFAULT_KEYS.rpc || "https://api.mainnet-beta.solana.com",
