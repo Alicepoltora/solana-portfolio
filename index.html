@@ -100,6 +100,7 @@
       <button class="btn-primary" id="walletBtn">Connect Wallet</button>
       <div class="wallet-dropdown" id="walletDropdown"></div>
     </div>
+    <button class="btn-ghost" id="disconnectBtn" title="Отключить кошелёк" style="display:none;">Disconnect</button>
   </div>
 </header>
 
@@ -252,20 +253,53 @@ $("settingsSave").onclick = () => {
 };
 
 // ---------- wallet connect ----------
-function detectWallets() {
+// Multiple installed extensions (Phantom/Solflare/Backpack) fighting over the same
+// window.solana / window.solflare globals is exactly the bug that caused "clicking
+// Solflare connects Backpack" — one wallet was shadowing another's global variable.
+// Wallet Standard fixes this at the root: every wallet self-registers its OWN isolated
+// object (own name, own connect/disconnect functions) via events, with no shared
+// globals to collide. This is the mechanism Phantom/Solflare/Backpack all support today.
+const standardWallets = new Map(); // name -> wallet-standard wallet object
+
+function registerStandardWallet(wallet) {
+  if (!wallet || !wallet.name) return;
+  standardWallets.set(wallet.name, wallet);
+}
+
+window.addEventListener("wallet-standard:register-wallet", (event) => {
+  try { event.detail({ detail: registerStandardWallet }); } catch (e) { console.warn("wallet-standard register failed", e); }
+});
+window.dispatchEvent(new CustomEvent("wallet-standard:app-ready", {
+  detail: { register: (...wallets) => wallets.forEach(registerStandardWallet) },
+}));
+
+// Legacy (pre-standard) injected-provider detection, kept as a fallback for any
+// wallet that hasn't adopted Wallet Standard yet. De-duped against standard wallets by name.
+function detectLegacyWallets() {
   const wallets = [];
-  if (window.phantom?.solana) wallets.push({ name: "Phantom", provider: window.phantom.solana });
-  else if (window.solana?.isPhantom) wallets.push({ name: "Phantom", provider: window.solana });
-  if (window.solflare) wallets.push({ name: "Solflare", provider: window.solflare });
-  if (window.backpack) wallets.push({ name: "Backpack", provider: window.backpack });
+  if (window.phantom?.solana) wallets.push({ name: "Phantom", kind: "legacy", provider: window.phantom.solana });
+  else if (window.solana?.isPhantom) wallets.push({ name: "Phantom", kind: "legacy", provider: window.solana });
+  if (window.solflare) wallets.push({ name: "Solflare", kind: "legacy", provider: window.solflare });
+  if (window.backpack) wallets.push({ name: "Backpack", kind: "legacy", provider: window.backpack });
   return wallets;
 }
 
-// Wallet extensions inject window.phantom / window.backpack / window.solflare
-// asynchronously after the page loads, and not always in the same order. If the user
-// clicks Connect Wallet before Phantom finishes injecting (Backpack often wins that
-// race), Phantom silently doesn't show up. Give slow injectors a brief window to appear.
-async function detectWalletsWithGrace(timeoutMs = 1000, intervalMs = 100) {
+function detectWallets() {
+  const byName = new Map();
+  detectLegacyWallets().forEach((w) => byName.set(w.name, w));
+  // Standard-registered wallets take priority — they're the ones that avoid the
+  // global-shadowing conflict, so prefer them whenever a wallet offers both.
+  for (const [name, sw] of standardWallets) {
+    if (sw.chains && !sw.chains.some((c) => c.startsWith("solana:"))) continue;
+    byName.set(name, { name, kind: "standard", standardWallet: sw });
+  }
+  return [...byName.values()];
+}
+
+// Wallet extensions inject asynchronously after the page loads, and not always in the
+// same order — clicking Connect before a slower one finishes injecting means it silently
+// doesn't show up. Give slow injectors a brief window to appear.
+async function detectWalletsWithGrace(timeoutMs = 1200, intervalMs = 100) {
   const start = Date.now();
   let found = detectWallets();
   const knownNames = new Set(found.map((w) => w.name));
@@ -275,22 +309,13 @@ async function detectWalletsWithGrace(timeoutMs = 1000, intervalMs = 100) {
     if (next.length !== found.length || next.some((w) => !knownNames.has(w.name))) {
       found = next;
       next.forEach((w) => knownNames.add(w.name));
-      // Keep waiting out the full window once something new shows up — another
-      // provider may still be a beat behind — but don't wait longer than timeoutMs total.
     }
   }
   return detectWallets();
 }
 
 $("walletBtn").onclick = async () => {
-  if (state.pubkey) {
-    // disconnect
-    state.pubkey = null;
-    $("walletBtn").textContent = "Connect Wallet";
-    $("content").style.display = "none";
-    $("emptyState").style.display = "block";
-    return;
-  }
+  if (state.pubkey) return; // use the dedicated Disconnect button instead
   const origLabel = $("walletBtn").textContent;
   $("walletBtn").textContent = "Loading…";
   const ok = await ensureWeb3(true);
@@ -316,20 +341,85 @@ $("walletBtn").onclick = async () => {
   }
 };
 
-async function connectWith(wallet) {
-  try {
-    const resp = await wallet.provider.connect();
-    const pubkey = resp.publicKey ? resp.publicKey.toString() : wallet.provider.publicKey.toString();
-    state.pubkey = pubkey;
-    $("walletBtn").textContent = short(pubkey);
-    $("walletAddr").textContent = pubkey;
-    $("emptyState").style.display = "none";
-    $("content").style.display = "block";
-    refreshAll();
-  } catch (e) {
-    alert("Не удалось подключить кошелёк: " + e.message);
+async function getWalletAccount(wallet, { silent } = {}) {
+  if (wallet.kind === "standard") {
+    const feature = wallet.standardWallet.features?.["standard:connect"];
+    if (!feature) throw new Error(`${wallet.name} не поддерживает standard:connect`);
+    const { accounts } = await feature.connect(silent ? { silent: true } : undefined);
+    if (!accounts || accounts.length === 0) throw new Error("Кошелёк не вернул ни одного аккаунта");
+    const acc = accounts[0];
+    const pubkey = acc.address || new solanaWeb3.PublicKey(acc.publicKey).toBase58();
+    return pubkey;
+  } else {
+    const resp = await wallet.provider.connect(silent ? { onlyIfTrusted: true } : undefined);
+    return resp?.publicKey ? resp.publicKey.toString() : wallet.provider.publicKey.toString();
   }
 }
+
+async function connectWith(wallet, { silent } = {}) {
+  try {
+    const pubkey = await getWalletAccount(wallet, { silent });
+    finalizeConnection(wallet, pubkey);
+  } catch (e) {
+    if (!silent) alert("Не удалось подключить кошелёк " + wallet.name + ": " + e.message);
+    return false;
+  }
+  return true;
+}
+
+function finalizeConnection(wallet, pubkey) {
+  state.pubkey = pubkey;
+  state.activeWallet = wallet;
+  localStorage.setItem("sol_last_wallet", wallet.name);
+  $("walletBtn").textContent = short(pubkey);
+  $("disconnectBtn").style.display = "inline-block";
+  $("walletAddr").textContent = pubkey;
+  $("emptyState").style.display = "none";
+  $("content").style.display = "block";
+  refreshAll();
+}
+
+async function disconnectWallet() {
+  const wallet = state.activeWallet;
+  try {
+    if (wallet?.kind === "standard") {
+      await wallet.standardWallet.features?.["standard:disconnect"]?.disconnect?.();
+    } else if (wallet?.provider?.disconnect) {
+      await wallet.provider.disconnect();
+    }
+  } catch (e) {
+    console.warn("disconnect() on wallet failed (clearing local session anyway)", e);
+  }
+  state.pubkey = null;
+  state.activeWallet = null;
+  localStorage.removeItem("sol_last_wallet");
+  $("walletBtn").textContent = "Connect Wallet";
+  $("disconnectBtn").style.display = "none";
+  $("content").style.display = "none";
+  $("emptyState").style.display = "block";
+}
+$("disconnectBtn").onclick = disconnectWallet;
+
+// ---------- persist session across page reload ----------
+// Wallets treat a previously-approved site as "trusted": connecting with
+// silent/onlyIfTrusted succeeds without a popup if the user already approved this
+// origin before, and simply fails quietly otherwise — so this never forces a prompt.
+async function tryRestoreSession() {
+  const lastWalletName = localStorage.getItem("sol_last_wallet");
+  if (!lastWalletName) return;
+  const ok = await ensureWeb3(false);
+  if (!ok) return;
+  const wallets = await detectWalletsWithGrace();
+  const wallet = wallets.find((w) => w.name === lastWalletName);
+  if (!wallet) return;
+  const pubkey = await (async () => {
+    try { return await getWalletAccount(wallet, { silent: true }); }
+    catch (e) { return null; }
+  })();
+  if (pubkey) finalizeConnection(wallet, pubkey);
+  else localStorage.removeItem("sol_last_wallet"); // stale/no-longer-trusted — don't keep retrying
+}
+tryRestoreSession();
 
 $("hideDust").onchange = () => { if (state._tokens) renderTokens(state._tokens); };
 
