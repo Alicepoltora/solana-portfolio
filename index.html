@@ -88,6 +88,15 @@
   .wallet-dropdown button{width:100%; text-align:left; background:transparent; color:var(--text); padding:10px 12px;}
   .wallet-dropdown button:hover{background:var(--panel2);}
   .err{color:var(--red); font-size:12px; padding:10px 18px;}
+  .reclaim-hero{display:flex; align-items:center; justify-content:space-between; gap:16px; padding:18px; flex-wrap:wrap;}
+  .reclaim-hero .big{font-size:22px; font-weight:800;}
+  .reclaim-hero .sub{color:var(--muted); font-size:13px; margin-top:4px;}
+  .btn-accent{background:linear-gradient(135deg,var(--accent2),#00a88f); color:#00251f; font-weight:700;}
+  .btn-small{padding:7px 12px; font-size:12px; border-radius:8px;}
+  .btn-danger{background:transparent; border:1px solid var(--red); color:var(--red);}
+  .reclaim-sub{padding:0 18px 16px;}
+  .reclaim-sub summary{cursor:pointer; color:var(--muted); font-size:13px; padding:10px 0;}
+  .warn-box{background:rgba(255,92,92,.08); border:1px solid rgba(255,92,92,.3); border-radius:10px; padding:12px 14px; margin:0 18px 14px; color:#ffb3b3; font-size:12px; line-height:1.5;}
 </style>
 </head>
 <body>
@@ -115,6 +124,11 @@
       <div class="label">Total portfolio value</div>
       <div class="value" id="totalValue">$0.00</div>
       <div class="addr" id="walletAddr"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-head"><h3>Reclaim SOL</h3><span class="badge" id="reclaimBadge">0</span></div>
+      <div class="card" id="reclaimCard"><div class="loading">Загрузка…</div></div>
     </div>
 
     <div class="section">
@@ -430,6 +444,7 @@ async function refreshAll() {
 
   $("tokensCard").innerHTML = '<div class="loading">Загрузка…</div>';
   $("stakeCard").innerHTML = '<div class="loading">Загрузка…</div>';
+  $("reclaimCard").innerHTML = '<div class="loading">Сканирую аккаунты…</div>';
   $("nftCard").innerHTML = '';
   $("defiCard").innerHTML = '';
 
@@ -437,6 +452,7 @@ async function refreshAll() {
   loadStaking(owner).catch((e) => showErr("stakeCard", e));
   loadNFTs(owner).catch((e) => showErr("nftCard", e));
   loadDefi(owner);
+  loadReclaimable(owner).catch((e) => showErr("reclaimCard", e));
 }
 
 function showErr(cardId, e) {
@@ -663,6 +679,272 @@ async function loadDefi(owner) {
     $("defiCard").innerHTML = `<div class="placeholder">Ответ Birdeye получен — доработай рендер под точную схему твоего тарифа:<br><code>${JSON.stringify(data).slice(0, 400)}…</code></div>`;
   } catch (e) {
     showErr("defiCard", e);
+  }
+}
+
+// ---------- Reclaim SOL ----------
+// Every SPL/Token-2022 account, and every stake account, holds a rent deposit for as
+// long as it exists. When a token account's balance hits zero (sent everything away)
+// or a stake account has finished deactivating, that deposit just sits there until you
+// explicitly close/withdraw it. This is the same mechanism behind Titan Forge, Sol
+// Incinerator, Unclaimed SOL etc. — nothing exotic, just SPL Token's CloseAccount (and
+// optionally Burn) instructions plus StakeProgram.withdraw, built by hand here so the
+// app doesn't need another CDN dependency beyond @solana/web3.js.
+//
+// NOTE: this does NOT reimplement Titan's own "scam fighting rewards" program (the
+// ScamIncinerator integration) — that's a proprietary third-party contract/backend we
+// have no spec or access to. What's implemented is the actual underlying mechanism:
+// close empty accounts for a full rent refund, withdraw matured stake, and (opt-in,
+// behind a warning) burn+close accounts that still hold a balance nobody wants.
+
+function u64LE(n) {
+  const buf = new Uint8Array(8);
+  let v = BigInt(n);
+  for (let i = 0; i < 8; i++) { buf[i] = Number(v & 0xffn); v >>= 8n; }
+  return buf;
+}
+
+// Minimal base58 encoder (for showing tx signatures / explorer links only).
+const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function base58Encode(bytes) {
+  let digits = [0];
+  for (let i = 0; i < bytes.length; i++) {
+    let carry = bytes[i];
+    for (let j = 0; j < digits.length; j++) { carry += digits[j] << 8; digits[j] = carry % 58; carry = (carry / 58) | 0; }
+    while (carry > 0) { digits.push(carry % 58); carry = (carry / 58) | 0; }
+  }
+  let out = "";
+  for (let i = 0; i < bytes.length && bytes[i] === 0; i++) out += "1";
+  for (let i = digits.length - 1; i >= 0; i--) out += BASE58_ALPHABET[digits[i]];
+  return out;
+}
+
+function buildCloseAccountIx(programId, account, destination, owner) {
+  return new solanaWeb3.TransactionInstruction({
+    programId,
+    keys: [
+      { pubkey: account, isSigner: false, isWritable: true },
+      { pubkey: destination, isSigner: false, isWritable: true },
+      { pubkey: owner, isSigner: true, isWritable: false },
+    ],
+    data: Uint8Array.from([9]), // TokenInstruction::CloseAccount
+  });
+}
+
+function buildBurnIx(programId, account, mint, owner, rawAmount) {
+  const data = new Uint8Array(9);
+  data[0] = 8; // TokenInstruction::Burn
+  data.set(u64LE(rawAmount), 1);
+  return new solanaWeb3.TransactionInstruction({
+    programId,
+    keys: [
+      { pubkey: account, isSigner: false, isWritable: true },
+      { pubkey: mint, isSigner: false, isWritable: true },
+      { pubkey: owner, isSigner: true, isWritable: false },
+    ],
+    data,
+  });
+}
+
+// Uniform sign+send across Wallet Standard and legacy injected providers.
+async function signAndSendTransaction(wallet, tx) {
+  const conn = state.connection;
+  const { blockhash, lastValidBlockHeight } = await withRetry(() => conn.getLatestBlockhash());
+  tx.recentBlockhash = blockhash;
+  tx.feePayer = new solanaWeb3.PublicKey(state.pubkey);
+
+  if (wallet.kind === "standard") {
+    const sw = wallet.standardWallet;
+    const account = sw.accounts?.[0];
+    if (!account) throw new Error("У кошелька нет активного аккаунта");
+    const serialized = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
+    const sendFeature = sw.features?.["solana:signAndSendTransaction"];
+    const signFeature = sw.features?.["solana:signTransaction"];
+    let signatureBytes;
+    if (sendFeature) {
+      const [result] = await sendFeature.signAndSendTransaction({ account, chain: "solana:mainnet", transaction: serialized });
+      signatureBytes = result.signature;
+    } else if (signFeature) {
+      const [result] = await signFeature.signTransaction({ account, chain: "solana:mainnet", transaction: serialized });
+      const sig = await conn.sendRawTransaction(result.signedTransaction, { skipPreflight: false });
+      await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+      return sig;
+    } else {
+      throw new Error(`${wallet.name} не поддерживает подпись транзакций (standard:connect есть, а sign — нет)`);
+    }
+    const sig = typeof signatureBytes === "string" ? signatureBytes : base58Encode(signatureBytes);
+    await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+    return sig;
+  } else {
+    if (wallet.provider.signAndSendTransaction) {
+      const res = await wallet.provider.signAndSendTransaction(tx);
+      const sig = typeof res === "string" ? res : res.signature;
+      await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+      return sig;
+    }
+    const signed = await wallet.provider.signTransaction(tx);
+    const sig = await conn.sendRawTransaction(signed.serialize());
+    await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+    return sig;
+  }
+}
+
+function explorerLink(sig) { return `https://solscan.io/tx/${sig}`; }
+
+async function loadReclaimable(owner) {
+  const conn = state.connection;
+  const [legacyAccs, t22Accs, epochInfo] = await Promise.all([
+    withRetry(() => conn.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID })),
+    withRetry(() => conn.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM_ID })),
+    withRetry(() => conn.getEpochInfo()),
+  ]);
+
+  const empty = [];
+  const spam = [];
+  [...legacyAccs.value.map((a) => ({ a, programId: TOKEN_PROGRAM_ID })), ...t22Accs.value.map((a) => ({ a, programId: TOKEN_2022_PROGRAM_ID }))]
+    .forEach(({ a, programId }) => {
+      const info = a.account.data.parsed.info;
+      const raw = info.tokenAmount.amount; // string, base units
+      const item = {
+        pubkey: a.pubkey, mint: new solanaWeb3.PublicKey(info.mint), programId,
+        rawAmount: raw, uiAmount: info.tokenAmount.uiAmount || 0,
+        decimals: info.tokenAmount.decimals, lamports: a.account.lamports,
+      };
+      if (raw === "0") empty.push(item); else spam.push(item);
+    });
+
+  // Fully-deactivated (withdrawable) stake accounts — reuses the same scan as Staking,
+  // just filtered to ones past their cooldown.
+  let withdrawable = [];
+  try {
+    const stakeAccs = await withRetry(() => conn.getParsedProgramAccounts(STAKE_PROGRAM_ID, {
+      filters: [{ dataSize: 200 }, { memcmp: { offset: 44, bytes: owner.toBase58() } }],
+    }), { retries: 3, baseDelay: 1000 });
+    withdrawable = stakeAccs.map(({ pubkey, account }) => {
+      const info = account.data.parsed.info;
+      const stake = info.stake;
+      const deactivationEpoch = stake ? Number(stake.delegation.deactivationEpoch) : null;
+      const isFullyDeactivated = deactivationEpoch !== null && deactivationEpoch < epochInfo.epoch;
+      return isFullyDeactivated ? { pubkey, lamports: account.lamports } : null;
+    }).filter(Boolean);
+  } catch (e) { console.warn("stake withdraw scan failed", e); }
+
+  state._reclaim = { empty, spam, withdrawable };
+  renderReclaimable();
+}
+
+function lamportsToSolStr(lamports) { return (lamports / 1e9).toFixed(5).replace(/0+$/, "").replace(/\.$/, ""); }
+
+function renderReclaimable() {
+  const { empty, spam, withdrawable } = state._reclaim || { empty: [], spam: [], withdrawable: [] };
+  const totalCount = empty.length + withdrawable.length;
+  $("reclaimBadge").textContent = totalCount;
+
+  if (totalCount === 0 && spam.length === 0) {
+    $("reclaimCard").innerHTML = '<div class="loading">Нечего возвращать — пустых аккаунтов и завершённого стейкинга не найдено</div>';
+    return;
+  }
+
+  const emptyLamports = empty.reduce((s, x) => s + x.lamports, 0);
+  const stakeLamports = withdrawable.reduce((s, x) => s + x.lamports, 0);
+  const totalLamports = emptyLamports + stakeLamports;
+
+  let html = "";
+  if (totalCount > 0) {
+    html += `<div class="reclaim-hero">
+      <div>
+        <div class="big">~${lamportsToSolStr(totalLamports)} SOL</div>
+        <div class="sub">${empty.length} пустых токен-аккаунтов${withdrawable.length ? ` + ${withdrawable.length} завершённых стейк-аккаунтов` : ""} готовы к возврату</div>
+      </div>
+      <button class="btn-accent" id="claimAllBtn">Claim ${lamportsToSolStr(totalLamports)} SOL</button>
+    </div>`;
+  }
+
+  if (spam.length > 0) {
+    html += `<details class="reclaim-sub">
+      <summary>Показать аккаунты с ненулевым балансом (${spam.length}) — возможный спам/дасты</summary>
+      <div class="warn-box">Эти аккаунты ещё содержат токены. Мы не проверяем, спам это или нет (нет доступа к реестру скам-токенов, как у Titan/Unclaimed SOL) — сжигание необратимо. Проверяй каждый токен сам перед тем как жать «Burn & Close».</div>
+      ${spam.map((s, i) => `
+        <div class="row">
+          <div class="token-icon"></div>
+          <div class="col-main">
+            <div class="sym">${short(s.mint.toBase58())}</div>
+            <div class="sub">${s.uiAmount} шт. · ${lamportsToSolStr(s.lamports)} SOL в аренде</div>
+          </div>
+          <button class="btn-danger btn-small" data-spam-idx="${i}">Burn &amp; Close</button>
+        </div>
+      `).join("")}
+    </details>`;
+  }
+
+  $("reclaimCard").innerHTML = html;
+
+  if (totalCount > 0) {
+    $("claimAllBtn").onclick = () => claimAllReclaimable(empty, withdrawable);
+  }
+  spam.forEach((s, i) => {
+    const btn = $("reclaimCard").querySelector(`[data-spam-idx="${i}"]`);
+    if (btn) btn.onclick = () => burnAndCloseOne(s);
+  });
+}
+
+async function claimAllReclaimable(empty, withdrawable) {
+  const wallet = state.activeWallet;
+  if (!wallet) return alert("Кошелёк не подключен");
+  const owner = new solanaWeb3.PublicKey(state.pubkey);
+  const btn = $("claimAllBtn");
+  const origText = btn.textContent;
+
+  try {
+    // Close empty token accounts in batches (comfortably under tx size limits).
+    const BATCH = 12;
+    let closed = 0;
+    for (let i = 0; i < empty.length; i += BATCH) {
+      const batch = empty.slice(i, i + BATCH);
+      btn.textContent = `Closing accounts ${i + 1}-${Math.min(i + BATCH, empty.length)} of ${empty.length}…`;
+      const tx = new solanaWeb3.Transaction();
+      batch.forEach((item) => tx.add(buildCloseAccountIx(item.programId, item.pubkey, owner, owner)));
+      await signAndSendTransaction(wallet, tx);
+      closed += batch.length;
+    }
+    // Withdraw fully-deactivated stake accounts one at a time (each needs its own
+    // authorized-signer context; StakeProgram.withdraw builds the correct instruction).
+    for (let i = 0; i < withdrawable.length; i++) {
+      const w = withdrawable[i];
+      btn.textContent = `Withdrawing stake ${i + 1} of ${withdrawable.length}…`;
+      const tx = solanaWeb3.StakeProgram.withdraw({
+        stakePubkey: w.pubkey, authorizedPubkey: owner, toPubkey: owner, lamports: w.lamports,
+      });
+      await signAndSendTransaction(wallet, tx);
+    }
+    btn.textContent = origText;
+    alert(`Готово: закрыто ${closed} аккаунтов, выведено ${withdrawable.length} стейк-аккаунтов.`);
+    refreshAll();
+  } catch (e) {
+    btn.textContent = origText;
+    alert("Не удалось завершить claim: " + e.message + ". Часть транзакций могла уже пройти — портфель сейчас обновится.");
+    refreshAll();
+  }
+}
+
+async function burnAndCloseOne(item) {
+  const wallet = state.activeWallet;
+  if (!wallet) return alert("Кошелёк не подключен");
+  const confirmed = confirm(
+    `Сжечь ${item.uiAmount} токенов (${short(item.mint.toBase58())}) и закрыть аккаунт?\n\n` +
+    `Это необратимо. Ты вернёшь ~${lamportsToSolStr(item.lamports)} SOL ренты, но сами токены будут уничтожены безвозвратно.`
+  );
+  if (!confirmed) return;
+  try {
+    const owner = new solanaWeb3.PublicKey(state.pubkey);
+    const tx = new solanaWeb3.Transaction();
+    tx.add(buildBurnIx(item.programId, item.pubkey, item.mint, owner, item.rawAmount));
+    tx.add(buildCloseAccountIx(item.programId, item.pubkey, owner, owner));
+    const sig = await signAndSendTransaction(wallet, tx);
+    alert("Сожжено и закрыто: " + explorerLink(sig));
+    refreshAll();
+  } catch (e) {
+    alert("Не удалось сжечь и закрыть аккаунт: " + e.message);
   }
 }
 
