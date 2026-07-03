@@ -95,7 +95,19 @@
   .btn-small{padding:7px 12px; font-size:12px; border-radius:8px;}
   .btn-danger{background:transparent; border:1px solid var(--red); color:var(--red);}
   .reclaim-sub{padding:0 18px 16px;}
-  .reclaim-sub summary{cursor:pointer; color:var(--muted); font-size:13px; padding:10px 0;}
+  .reclaim-sub summary{
+    cursor:pointer; list-style:none; display:flex; align-items:center; gap:10px;
+    color:#ffcf7a; font-size:14px; font-weight:700; letter-spacing:.2px;
+    padding:14px 16px; margin:10px 0 0; border-radius:10px;
+    background:rgba(255,159,10,.12); border:1px solid rgba(255,159,10,.35);
+  }
+  .reclaim-sub summary::-webkit-details-marker{display:none;}
+  .reclaim-sub summary:hover{background:rgba(255,159,10,.18);}
+  .reclaim-sub summary::before{content:"⚠"; font-size:16px;}
+  .reclaim-sub summary .count-pill{
+    margin-left:auto; background:rgba(255,159,10,.25); color:#ffcf7a; font-weight:800;
+    font-size:12px; padding:3px 10px; border-radius:20px;
+  }
   .warn-box{background:rgba(255,92,92,.08); border:1px solid rgba(255,92,92,.3); border-radius:10px; padding:12px 14px; margin:0 18px 14px; color:#ffb3b3; font-size:12px; line-height:1.5;}
 </style>
 </head>
@@ -104,19 +116,19 @@
 <header>
   <div class="logo"><span class="dot"></span> Solana Portfolio</div>
   <div class="header-actions">
-    <button class="icon-btn" id="settingsBtn" title="Настройки">⚙</button>
+    <button class="icon-btn" id="settingsBtn" title="Settings">⚙</button>
     <div class="wallet-menu">
       <button class="btn-primary" id="walletBtn">Connect Wallet</button>
       <div class="wallet-dropdown" id="walletDropdown"></div>
     </div>
-    <button class="btn-ghost" id="disconnectBtn" title="Отключить кошелёк" style="display:none;">Disconnect</button>
+    <button class="btn-ghost" id="disconnectBtn" title="Disconnect wallet" style="display:none;">Disconnect</button>
   </div>
 </header>
 
 <main>
   <div id="emptyState" class="empty-state">
-    <h2>Портфель на Solana</h2>
-    <p>Подключи кошелёк, чтобы увидеть SOL, SPL-токены, стейкинг, NFT и DeFi-позиции.</p>
+    <h2>Your Solana portfolio</h2>
+    <p>Connect a wallet to see SOL, SPL tokens, staking, NFTs, and DeFi positions.</p>
   </div>
 
   <div id="content" style="display:none;">
@@ -128,18 +140,18 @@
 
     <div class="section">
       <div class="section-head"><h3>Reclaim SOL</h3><span class="badge" id="reclaimBadge">0</span></div>
-      <div class="card" id="reclaimCard"><div class="loading">Загрузка…</div></div>
+      <div class="card" id="reclaimCard"><div class="loading">Loading…</div></div>
     </div>
 
     <div class="section">
       <div class="section-head"><h3>Tokens</h3><span class="badge" id="tokensBadge">0</span></div>
-      <div class="toggle-line"><input type="checkbox" id="hideDust" checked> Скрыть токены дешевле $1</div>
-      <div class="card" id="tokensCard"><div class="loading">Загрузка…</div></div>
+      <div class="toggle-line"><input type="checkbox" id="hideDust" checked> Hide tokens under $1</div>
+      <div class="card" id="tokensCard"><div class="loading">Loading…</div></div>
     </div>
 
     <div class="section">
       <div class="section-head"><h3>Staking</h3><span class="badge" id="stakeBadge">0</span></div>
-      <div class="card" id="stakeCard"><div class="loading">Загрузка…</div></div>
+      <div class="card" id="stakeCard"><div class="loading">Loading…</div></div>
     </div>
 
     <div class="section">
@@ -148,7 +160,7 @@
     </div>
 
     <div class="section">
-      <div class="section-head"><h3>DeFi позиции</h3><span class="badge">beta</span></div>
+      <div class="section-head"><h3>DeFi positions</h3><span class="badge">beta</span></div>
       <div class="card" id="defiCard"></div>
     </div>
   </div>
@@ -156,23 +168,23 @@
 
 <div class="overlay" id="settingsOverlay">
   <div class="modal">
-    <h3>Настройки</h3>
-    <p class="hint">Ключи хранятся только в этом браузере (localStorage), никуда не отправляются кроме соответствующих API.</p>
+    <h3>Settings</h3>
+    <p class="hint">Keys are stored only in this browser (localStorage) and never sent anywhere except the matching API.</p>
     <div class="field">
       <label>RPC endpoint</label>
       <input id="rpcInput" placeholder="https://api.mainnet-beta.solana.com">
     </div>
     <div class="field">
-      <label>Helius API key (для NFT, опционально)</label>
-      <input id="heliusInput" placeholder="получить бесплатно на helius.dev">
+      <label>Helius API key (for NFTs, optional)</label>
+      <input id="heliusInput" placeholder="get one free at helius.dev">
     </div>
     <div class="field">
-      <label>Birdeye API key (для DeFi-позиций, опционально)</label>
-      <input id="birdeyeInput" placeholder="получить на docs.birdeye.so">
+      <label>Birdeye API key (for DeFi positions, optional)</label>
+      <input id="birdeyeInput" placeholder="get one at docs.birdeye.so">
     </div>
     <div class="modal-actions">
-      <button class="btn-ghost" id="settingsCancel" style="flex:1;">Отмена</button>
-      <button class="btn-primary" id="settingsSave" style="flex:1;">Сохранить</button>
+      <button class="btn-ghost" id="settingsCancel" style="flex:1;">Cancel</button>
+      <button class="btn-primary" id="settingsSave" style="flex:1;">Save</button>
     </div>
   </div>
 </div>
@@ -225,7 +237,7 @@ async function ensureWeb3(withAlert) {
   if (web3Ready()) return true;
   const ok = await loadWeb3Fallback();
   if (!ok && withAlert) {
-    alert("Не удалось загрузить библиотеку @solana/web3.js (заблокирован CDN?). Проверь VPN/блокировщик рекламы и обнови страницу.");
+    alert("Couldn't load the @solana/web3.js library (CDN blocked?). Check your VPN/ad blocker and reload the page.");
   }
   return ok;
 }
@@ -244,9 +256,9 @@ $("settingsBtn").onclick = () => {
   $("rpcInput").value = localStorage.getItem("sol_rpc") || "";
   $("heliusInput").value = localStorage.getItem("sol_helius") || "";
   $("birdeyeInput").value = localStorage.getItem("sol_birdeye") || "";
-  $("rpcInput").placeholder = DEFAULT_KEYS.rpc ? "используется общий RPC по умолчанию" : "https://api.mainnet-beta.solana.com";
-  $("heliusInput").placeholder = DEFAULT_KEYS.helius ? "используется общий ключ по умолчанию" : "получить бесплатно на helius.dev";
-  $("birdeyeInput").placeholder = DEFAULT_KEYS.birdeye ? "используется общий ключ по умолчанию" : "получить на docs.birdeye.so";
+  $("rpcInput").placeholder = DEFAULT_KEYS.rpc ? "using shared default RPC" : "https://api.mainnet-beta.solana.com";
+  $("heliusInput").placeholder = DEFAULT_KEYS.helius ? "using shared default key" : "get one free at helius.dev";
+  $("birdeyeInput").placeholder = DEFAULT_KEYS.birdeye ? "using shared default key" : "get one at docs.birdeye.so";
   $("settingsOverlay").classList.add("show");
 };
 $("settingsCancel").onclick = () => $("settingsOverlay").classList.remove("show");
@@ -337,7 +349,7 @@ $("walletBtn").onclick = async () => {
   const wallets = await detectWalletsWithGrace();
   $("walletBtn").textContent = origLabel;
   if (wallets.length === 0) {
-    alert("Кошелёк не найден. Установи расширение Phantom, Solflare или Backpack и обнови страницу.");
+    alert("No wallet found. Install the Phantom, Solflare, or Backpack extension and reload the page.");
     return;
   }
   if (wallets.length === 1) {
@@ -358,9 +370,9 @@ $("walletBtn").onclick = async () => {
 async function getWalletAccount(wallet, { silent } = {}) {
   if (wallet.kind === "standard") {
     const feature = wallet.standardWallet.features?.["standard:connect"];
-    if (!feature) throw new Error(`${wallet.name} не поддерживает standard:connect`);
+    if (!feature) throw new Error(`${wallet.name} doesn't support standard:connect`);
     const { accounts } = await feature.connect(silent ? { silent: true } : undefined);
-    if (!accounts || accounts.length === 0) throw new Error("Кошелёк не вернул ни одного аккаунта");
+    if (!accounts || accounts.length === 0) throw new Error("Wallet didn't return any account");
     const acc = accounts[0];
     const pubkey = acc.address || new solanaWeb3.PublicKey(acc.publicKey).toBase58();
     return pubkey;
@@ -375,7 +387,7 @@ async function connectWith(wallet, { silent } = {}) {
     const pubkey = await getWalletAccount(wallet, { silent });
     finalizeConnection(wallet, pubkey);
   } catch (e) {
-    if (!silent) alert("Не удалось подключить кошелёк " + wallet.name + ": " + e.message);
+    if (!silent) alert("Couldn't connect to " + wallet.name + ": " + e.message);
     return false;
   }
   return true;
@@ -442,9 +454,9 @@ async function refreshAll() {
   state.connection = new solanaWeb3.Connection(cfg.rpc, "confirmed");
   const owner = new solanaWeb3.PublicKey(state.pubkey);
 
-  $("tokensCard").innerHTML = '<div class="loading">Загрузка…</div>';
-  $("stakeCard").innerHTML = '<div class="loading">Загрузка…</div>';
-  $("reclaimCard").innerHTML = '<div class="loading">Сканирую аккаунты…</div>';
+  $("tokensCard").innerHTML = '<div class="loading">Loading…</div>';
+  $("stakeCard").innerHTML = '<div class="loading">Loading…</div>';
+  $("reclaimCard").innerHTML = '<div class="loading">Scanning accounts…</div>';
   $("nftCard").innerHTML = '';
   $("defiCard").innerHTML = '';
 
@@ -457,7 +469,7 @@ async function refreshAll() {
 
 function showErr(cardId, e) {
   console.error(e);
-  $(cardId).innerHTML = `<div class="err">Ошибка загрузки: ${e.message}. Публичный RPC часто режет по лимитам — попробуй свой RPC (Alchemy/Helius) в настройках ⚙</div>`;
+  $(cardId).innerHTML = `<div class="err">Load error: ${e.message}. Public RPC often rate-limits — try your own RPC (Alchemy/Helius) in Settings ⚙</div>`;
 }
 
 // Retries on 429 / compute-unit-throttling errors with exponential backoff.
@@ -549,7 +561,7 @@ function renderTokens(rows) {
   const visible = rows.filter((r) => !hideDust || r.value >= 1);
   $("tokensBadge").textContent = rows.length;
   if (visible.length === 0) {
-    $("tokensCard").innerHTML = '<div class="loading">Нет токенов дороже $1</div>';
+    $("tokensCard").innerHTML = '<div class="loading">No tokens above $1</div>';
     return;
   }
   $("tokensCard").innerHTML = visible.map((r) => `
@@ -582,7 +594,7 @@ async function loadStaking(owner) {
 
   $("stakeBadge").textContent = accounts.length;
   if (accounts.length === 0) {
-    $("stakeCard").innerHTML = '<div class="loading">Нет активного стейкинга</div>';
+    $("stakeCard").innerHTML = '<div class="loading">No active staking</div>';
     updateGrandTotal("stake", 0);
     return;
   }
@@ -626,8 +638,8 @@ async function loadStaking(owner) {
 async function loadNFTs(owner) {
   if (!cfg.helius) {
     $("nftCard").innerHTML = `<div class="placeholder">
-      Чтобы увидеть NFT, добавь бесплатный Helius API key в настройках ⚙ (helius.dev — регистрация за пару минут, есть free tier).
-      Используется метод <code>getAssetsByOwner</code> (Digital Asset Standard API).
+      To see NFTs, add a free Helius API key in Settings ⚙ (helius.dev — sign-up takes a couple minutes, free tier available).
+      Uses the <code>getAssetsByOwner</code> method (Digital Asset Standard API).
     </div>`;
     $("nftBadge").textContent = 0;
     return;
@@ -646,7 +658,7 @@ async function loadNFTs(owner) {
     const items = (data.result?.items || []).filter((i) => i.interface !== "FungibleToken" && i.interface !== "FungibleAsset");
     $("nftBadge").textContent = items.length;
     if (items.length === 0) {
-      $("nftCard").innerHTML = '<div class="loading">NFT не найдены</div>';
+      $("nftCard").innerHTML = '<div class="loading">No NFTs found</div>';
       return;
     }
     $("nftCard").innerHTML = `<div class="nft-grid">${items.map((i) => {
@@ -665,8 +677,8 @@ async function loadNFTs(owner) {
 async function loadDefi(owner) {
   if (!cfg.birdeye) {
     $("defiCard").innerHTML = `<div class="placeholder">
-      Лендинг/LP/перпы (Kamino, Drift, Marinade и т.п.) требуют агрегатор — на Solana нет единого стандарта позиций как ERC20/Aave на EVM.
-      Добавь Birdeye API key в настройках ⚙, чтобы включить этот блок (wallet API — beta, docs.birdeye.so). Точная схема ответа может отличаться в зависимости от тарифа — endpoint ниже best-effort и может потребовать правки под твой план.
+      Lending/LP/perps (Kamino, Drift, Marinade, etc.) need an aggregator — Solana has no unified position standard like ERC20/Aave on EVM.
+      Add a Birdeye API key in Settings ⚙ to enable this block (wallet API — beta, docs.birdeye.so). The exact response schema may vary by plan — the endpoint below is best-effort and may need adjusting for your tier.
     </div>`;
     return;
   }
@@ -676,7 +688,7 @@ async function loadDefi(owner) {
     });
     const data = await res.json();
     if (!data.success) throw new Error(data.message || "Birdeye API error");
-    $("defiCard").innerHTML = `<div class="placeholder">Ответ Birdeye получен — доработай рендер под точную схему твоего тарифа:<br><code>${JSON.stringify(data).slice(0, 400)}…</code></div>`;
+    $("defiCard").innerHTML = `<div class="placeholder">Got a Birdeye response — adjust the rendering to match your plan's exact schema:<br><code>${JSON.stringify(data).slice(0, 400)}…</code></div>`;
   } catch (e) {
     showErr("defiCard", e);
   }
@@ -756,7 +768,7 @@ async function signAndSendTransaction(wallet, tx) {
   if (wallet.kind === "standard") {
     const sw = wallet.standardWallet;
     const account = sw.accounts?.[0];
-    if (!account) throw new Error("У кошелька нет активного аккаунта");
+    if (!account) throw new Error("Wallet has no active account");
     const serialized = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
     const sendFeature = sw.features?.["solana:signAndSendTransaction"];
     const signFeature = sw.features?.["solana:signTransaction"];
@@ -770,7 +782,7 @@ async function signAndSendTransaction(wallet, tx) {
       await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
       return sig;
     } else {
-      throw new Error(`${wallet.name} не поддерживает подпись транзакций (standard:connect есть, а sign — нет)`);
+      throw new Error(`${wallet.name} doesn't support transaction signing (has standard:connect, but no sign feature)`);
     }
     const sig = typeof signatureBytes === "string" ? signatureBytes : base58Encode(signatureBytes);
     await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
@@ -841,7 +853,7 @@ function renderReclaimable() {
   $("reclaimBadge").textContent = totalCount;
 
   if (totalCount === 0 && spam.length === 0) {
-    $("reclaimCard").innerHTML = '<div class="loading">Нечего возвращать — пустых аккаунтов и завершённого стейкинга не найдено</div>';
+    $("reclaimCard").innerHTML = '<div class="loading">Nothing to reclaim — no empty accounts or matured stake found</div>';
     return;
   }
 
@@ -854,7 +866,7 @@ function renderReclaimable() {
     html += `<div class="reclaim-hero">
       <div>
         <div class="big">~${lamportsToSolStr(totalLamports)} SOL</div>
-        <div class="sub">${empty.length} пустых токен-аккаунтов${withdrawable.length ? ` + ${withdrawable.length} завершённых стейк-аккаунтов` : ""} готовы к возврату</div>
+        <div class="sub">${empty.length} empty token accounts${withdrawable.length ? ` + ${withdrawable.length} matured stake accounts` : ""} ready to reclaim</div>
       </div>
       <button class="btn-accent" id="claimAllBtn">Claim ${lamportsToSolStr(totalLamports)} SOL</button>
     </div>`;
@@ -862,14 +874,14 @@ function renderReclaimable() {
 
   if (spam.length > 0) {
     html += `<details class="reclaim-sub">
-      <summary>Показать аккаунты с ненулевым балансом (${spam.length}) — возможный спам/дасты</summary>
-      <div class="warn-box">Эти аккаунты ещё содержат токены. Мы не проверяем, спам это или нет (нет доступа к реестру скам-токенов, как у Titan/Unclaimed SOL) — сжигание необратимо. Проверяй каждый токен сам перед тем как жать «Burn & Close».</div>
+      <summary>Accounts with a remaining balance — possible spam/dust<span class="count-pill">${spam.length}</span></summary>
+      <div class="warn-box">These accounts still hold tokens. We don't verify whether they're spam (no access to a scam-token registry like Titan/Unclaimed SOL use) — burning is irreversible. Check each token yourself before hitting "Burn &amp; Close".</div>
       ${spam.map((s, i) => `
         <div class="row">
           <div class="token-icon"></div>
           <div class="col-main">
             <div class="sym">${short(s.mint.toBase58())}</div>
-            <div class="sub">${s.uiAmount} шт. · ${lamportsToSolStr(s.lamports)} SOL в аренде</div>
+            <div class="sub">${s.uiAmount} tokens · ${lamportsToSolStr(s.lamports)} SOL in rent</div>
           </div>
           <button class="btn-danger btn-small" data-spam-idx="${i}">Burn &amp; Close</button>
         </div>
@@ -890,7 +902,7 @@ function renderReclaimable() {
 
 async function claimAllReclaimable(empty, withdrawable) {
   const wallet = state.activeWallet;
-  if (!wallet) return alert("Кошелёк не подключен");
+  if (!wallet) return alert("Wallet not connected");
   const owner = new solanaWeb3.PublicKey(state.pubkey);
   const btn = $("claimAllBtn");
   const origText = btn.textContent;
@@ -918,21 +930,21 @@ async function claimAllReclaimable(empty, withdrawable) {
       await signAndSendTransaction(wallet, tx);
     }
     btn.textContent = origText;
-    alert(`Готово: закрыто ${closed} аккаунтов, выведено ${withdrawable.length} стейк-аккаунтов.`);
+    alert(`Done: closed ${closed} accounts, withdrew ${withdrawable.length} stake accounts.`);
     refreshAll();
   } catch (e) {
     btn.textContent = origText;
-    alert("Не удалось завершить claim: " + e.message + ". Часть транзакций могла уже пройти — портфель сейчас обновится.");
+    alert("Couldn't finish the claim: " + e.message + ". Some transactions may have already gone through — the portfolio will refresh now.");
     refreshAll();
   }
 }
 
 async function burnAndCloseOne(item) {
   const wallet = state.activeWallet;
-  if (!wallet) return alert("Кошелёк не подключен");
+  if (!wallet) return alert("Wallet not connected");
   const confirmed = confirm(
-    `Сжечь ${item.uiAmount} токенов (${short(item.mint.toBase58())}) и закрыть аккаунт?\n\n` +
-    `Это необратимо. Ты вернёшь ~${lamportsToSolStr(item.lamports)} SOL ренты, но сами токены будут уничтожены безвозвратно.`
+    `Burn ${item.uiAmount} tokens (${short(item.mint.toBase58())}) and close the account?\n\n` +
+    `This is irreversible. You'll get back ~${lamportsToSolStr(item.lamports)} SOL in rent, but the tokens themselves will be permanently destroyed.`
   );
   if (!confirmed) return;
   try {
@@ -941,10 +953,10 @@ async function burnAndCloseOne(item) {
     tx.add(buildBurnIx(item.programId, item.pubkey, item.mint, owner, item.rawAmount));
     tx.add(buildCloseAccountIx(item.programId, item.pubkey, owner, owner));
     const sig = await signAndSendTransaction(wallet, tx);
-    alert("Сожжено и закрыто: " + explorerLink(sig));
+    alert("Burned and closed: " + explorerLink(sig));
     refreshAll();
   } catch (e) {
-    alert("Не удалось сжечь и закрыть аккаунт: " + e.message);
+    alert("Couldn't burn and close the account: " + e.message);
   }
 }
 
